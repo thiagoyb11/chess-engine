@@ -14,7 +14,12 @@ Board::Board()
           0x8100000000000081ULL,
           0x0800000000000008ULL,
           0x1000000000000010ULL
-      } {}
+      } {
+        halfmoveClock = 0;
+        moveHistory.push_back("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0");
+        moveCount = 0;
+        pieceMap = {{0, 'p'}, {1, 'b'}, {2, 'n'}, {3, 'r'}, {4, 'q'}, {5, 'k'}, {6, 'P'}, {7, 'B'}, {8, 'N'}, {9, 'R'}, {10, 'Q'}, {11, 'K'}};
+      }
 
 u64 Board::getPieces(side s, enumPiece p) const {
     return pieceBB[s] & pieceBB[p + 2];
@@ -68,6 +73,9 @@ int Board::updatePosition(int start, int end, side s, enumPiece p) {
     if (start < 0 || start >= 64 || end < 0 || end >= 64) {
         return -1;
     }
+    bool pieceCaptured = false;
+    bool pawnMoved = (p == Pawn);
+
     u64 pieceBBcopy[8];
     std::copy(std::begin(pieceBB), std::end(pieceBB), pieceBBcopy);
     const bool castleWhiteKingsideCopy = castleWhiteKingside;
@@ -126,9 +134,11 @@ int Board::updatePosition(int start, int end, side s, enumPiece p) {
     enPassantSquare = -1;
 
     if (pieceBB[enemy] & endMask) {
+        pieceCaptured = true;
         removePieceAt(end);
     }
     if (enPassantCapture) {
+        pieceCaptured = true;
         removePieceAt(capturedPawnSquare);
     }
     if (p == Pawn && abs(start - end) == 16) {
@@ -181,6 +191,13 @@ int Board::updatePosition(int start, int end, side s, enumPiece p) {
         std::cout<<"Invalid Move"<<'\n';
         return -1;
     }
+    if(turn == White) turn = Black;
+    else turn = White;
+    if(pieceCaptured || pawnMoved) halfmoveClock = 0;
+    else halfmoveClock++;
+    moveCount++;
+    saveBoardState();
+    std::cout<<"Move Count: "<<moveCount<<" FEN:"<<moveHistory.back()<<'\n';
     return 0;
 }
 
@@ -503,4 +520,59 @@ bool Board::kingAttacked(side s)
         }
     }
     return false;
+}
+
+void Board::saveBoardState() {
+    std::string FEN;
+
+    for (int i = 7; i >= 0; i--)
+    {
+        int emptySpaces = 0;
+        for (int j = 0; j < 8; j++)
+        {
+            int idx =i*8 + j;
+            int pieceIdx = getPieceAt(idx);
+
+            if(getSidePieces(White) & (1ULL << idx))
+            {
+                if(emptySpaces > 0)
+                {
+                    FEN += std::to_string(emptySpaces);
+                    emptySpaces = 0;
+                }
+                FEN += pieceMap[pieceIdx + 6];
+            }
+            else if(getSidePieces(Black) & (1ULL << idx))
+            {
+                if(emptySpaces > 0)
+                {
+                    FEN += std::to_string(emptySpaces);
+                    emptySpaces = 0;
+                }
+                FEN += pieceMap[pieceIdx];
+            }
+            else
+            {
+                emptySpaces++;
+            }
+        }
+        if(emptySpaces > 0)
+        {
+            FEN += std::to_string(emptySpaces);
+            emptySpaces = 0;
+        }
+        FEN += (i > 0) ? "/" : " ";
+    }
+
+    FEN += (turn == White) ? "w " : "b ";
+    FEN += (castleWhiteKingside ? "K" : "");
+    FEN += (castleWhiteQueenside ? "Q" : "");
+    FEN += (castleBlackKingside ? "k" : "");
+    FEN += (castleBlackQueenside ? "q" : "");
+    FEN += (castleWhiteKingside || castleWhiteQueenside || castleBlackKingside || castleBlackQueenside) ? " " : "- ";
+    FEN += (enPassantSquare != -1) ? std::string(1, 'a' + (enPassantSquare % 8)) + std::to_string((enPassantSquare / 8)) + " " : "- ";
+    FEN += std::to_string(halfmoveClock) + " ";
+    FEN += std::to_string(moveCount / 2);
+
+    moveHistory.push_back(FEN);
 }
