@@ -18,7 +18,6 @@ public:
     u64 getAllPieces() const;
     u64 getPawnAttacks(side color) const;
     void removePieceAt(int idx);
-    void saveBoardState();
     int getPieceAt(int idx);
     int updatePosition(int start, int end, side s, enumPiece p);
     u64 getPawnMoves(int idx, side turn) const;
@@ -28,16 +27,35 @@ public:
     u64 getQueenMoves(int idx, side turn) const;
     u64 getKingMoves(int idx, side turn) const;
     bool kingAttacked(side s);
+    void loadFromFEN(const std::string& fen);
+    side getTurn() const { return turn; }
+    void undoMove();
+
 private:
+    // Complete pre-move state. Keeping this compact binary snapshot makes
+    // undo constant-time and avoids serializing/parsing text during search.
+    struct MoveState {
+        u64 pieceBB[8];
+        bool castleWhiteKingside;
+        bool castleWhiteQueenside;
+        bool castleBlackKingside;
+        bool castleBlackQueenside;
+        int enPassantSquare;
+        side turn;
+        int moveCount;
+        int halfmoveClock;
+    };
+
+    void saveBoardState(const MoveState& state);
+
     u64 pieceBB[8];
     bool castleWhiteKingside = true;
     bool castleWhiteQueenside = true;
     bool castleBlackKingside = true;
     bool castleBlackQueenside = true;
     int enPassantSquare = -1;
-    std::unordered_map<int, char> pieceMap;
     side turn = White;
     int moveCount;
-    std::vector<std::string> moveHistory;
+    std::vector<MoveState> moveHistory;
     int halfmoveClock;
 };

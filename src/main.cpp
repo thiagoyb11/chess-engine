@@ -128,7 +128,6 @@ int getMove(std::string move, Board& cboard, Board::side turn)
     }
     else
     {
-        std::cout<<"Invalid Move"<<'\n';
         return -1;
     }
     
@@ -142,16 +141,88 @@ int getMove(std::string move, Board& cboard, Board::side turn)
             int returnVal = makeMove(move, cboard, p, turn);
             return returnVal;
         }
-        std::cout<<"Invalid Move"<<'\n';
         return -1;
     }
     else
     {
-        std::cout<<"Invalid Move"<<'\n';
         return -1;
     }
     
 };
+
+std::vector<std::string> generateAllMoves(Board& cboard)
+{
+    u64 sidePieces = cboard.getSidePieces(cboard.getTurn());
+    std::vector<std::string> movesVector;
+
+    for(int i = 0; i < 64; i++)
+    {
+        if(sidePieces & (1ULL << i))
+        {
+            int pieceIdx = cboard.getPieceAt(i);
+            Board::enumPiece p = static_cast<Board::enumPiece>(pieceIdx);
+            u64 moves = 0;
+
+            switch(p)
+            {
+                case Board::enumPiece::Pawn:
+                    moves = cboard.getPawnMoves(i, cboard.getTurn());
+                    break;
+                case Board::enumPiece::Knight:
+                    moves = cboard.getKnightMoves(i, cboard.getTurn());
+                    break;
+                case Board::enumPiece::Bishop:
+                    moves = cboard.getBishopMoves(i, cboard.getTurn());
+                    break;
+                case Board::enumPiece::Rook:
+                    moves = cboard.getRookMoves(i, cboard.getTurn());
+                    break;
+                case Board::enumPiece::Queen:
+                    moves = cboard.getQueenMoves(i, cboard.getTurn());
+                    break;
+                case Board::enumPiece::King:
+                    moves = cboard.getKingMoves(i, cboard.getTurn());
+                    break;
+            }
+
+            for(int j = 0; j < 64; j++)
+            {
+                if(moves & (1ULL << j))
+                {
+                    std::string move = "....";
+                    move[0] = 'a' + (i % 8);
+                    move[1] = '1' + (i / 8);
+                    move[2] = 'a' + (j % 8);
+                    move[3] = '1' + (j / 8);
+                    movesVector.push_back(move);
+                }
+            }
+        }
+    }
+    return movesVector;
+}
+
+u64 perft(Board& cboard, int depth)
+{
+    if(depth == 0) return 1;
+
+    u64 nodes = 0;
+    std::vector<std::string> moves = generateAllMoves(cboard);
+
+    for(const std::string& move : moves)
+    {
+        Board::side turnColor = cboard.getTurn();
+        int returnVal = getMove(move, cboard, turnColor);
+        if(returnVal == 0)
+        {
+            nodes += perft(cboard, depth - 1);
+            // Undo the move
+            cboard.undoMove();
+        }
+    }
+
+    return nodes;
+}
 
 int makeMove(std::string move, Board& cboard, Board::enumPiece p, Board::side color) {
     int idxStart = decode(move.substr(0, 2));
@@ -159,24 +230,22 @@ int makeMove(std::string move, Board& cboard, Board::enumPiece p, Board::side co
     
     int returnVal = cboard.updatePosition(idxStart, idxEnd, color, p);
 
-    system("clear");
-    printBoard(cboard);
-
     return returnVal;
 }
 
 int main() {
     Board cboard;
-    printBoard(cboard);
     bool turn = 0;
+
+    std::cout<<perft(cboard, 6)<<'\n';
     
-    while(true){
+    /*while(true){
         std::string move;
         std::cin>>move;
         Board::side turnColor = turn == 0 ? Board::White : Board::Black;
         int returnVal = getMove(move, cboard, turnColor);
         if(returnVal == 0) turn = !turn;
-    }
+    } */
 
     return 0;
 }

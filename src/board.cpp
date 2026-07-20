@@ -16,9 +16,7 @@ Board::Board()
           0x1000000000000010ULL
       } {
         halfmoveClock = 0;
-        moveHistory.push_back("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0");
         moveCount = 0;
-        pieceMap = {{0, 'p'}, {1, 'b'}, {2, 'n'}, {3, 'r'}, {4, 'q'}, {5, 'k'}, {6, 'P'}, {7, 'B'}, {8, 'N'}, {9, 'R'}, {10, 'Q'}, {11, 'K'}};
       }
 
 u64 Board::getPieces(side s, enumPiece p) const {
@@ -76,13 +74,16 @@ int Board::updatePosition(int start, int end, side s, enumPiece p) {
     bool pieceCaptured = false;
     bool pawnMoved = (p == Pawn);
 
-    u64 pieceBBcopy[8];
-    std::copy(std::begin(pieceBB), std::end(pieceBB), pieceBBcopy);
-    const bool castleWhiteKingsideCopy = castleWhiteKingside;
-    const bool castleWhiteQueensideCopy = castleWhiteQueenside;
-    const bool castleBlackKingsideCopy = castleBlackKingside;
-    const bool castleBlackQueensideCopy = castleBlackQueenside;
-    const int enPassantSquareCopy = enPassantSquare;
+    MoveState previousState{};
+    std::copy(std::begin(pieceBB), std::end(pieceBB), previousState.pieceBB);
+    previousState.castleWhiteKingside = castleWhiteKingside;
+    previousState.castleWhiteQueenside = castleWhiteQueenside;
+    previousState.castleBlackKingside = castleBlackKingside;
+    previousState.castleBlackQueenside = castleBlackQueenside;
+    previousState.enPassantSquare = enPassantSquare;
+    previousState.turn = turn;
+    previousState.moveCount = moveCount;
+    previousState.halfmoveClock = halfmoveClock;
 
     const u64 startMask = 1ULL << start;
     const u64 endMask = 1ULL << end;
@@ -112,7 +113,7 @@ int Board::updatePosition(int start, int end, side s, enumPiece p) {
         pieceBB[s] = (pieceBB[s] & ~startMask) | (1ULL << middle);
         pieceBB[King + 2] = (pieceBB[King + 2] & ~startMask) | (1ULL << middle);
         const bool crossesCheck = kingAttacked(s);
-        std::copy(std::begin(pieceBBcopy), std::end(pieceBBcopy), pieceBB);
+        std::copy(std::begin(previousState.pieceBB), std::end(previousState.pieceBB), pieceBB);
         if (crossesCheck) {
             return -1;
         }
@@ -182,13 +183,12 @@ int Board::updatePosition(int start, int end, side s, enumPiece p) {
 
     if(kingAttacked(s))
     {
-        std::copy(std::begin(pieceBBcopy), std::end(pieceBBcopy), pieceBB);
-        castleWhiteKingside = castleWhiteKingsideCopy;
-        castleWhiteQueenside = castleWhiteQueensideCopy;
-        castleBlackKingside = castleBlackKingsideCopy;
-        castleBlackQueenside = castleBlackQueensideCopy;
-        enPassantSquare = enPassantSquareCopy;
-        std::cout<<"Invalid Move"<<'\n';
+        std::copy(std::begin(previousState.pieceBB), std::end(previousState.pieceBB), pieceBB);
+        castleWhiteKingside = previousState.castleWhiteKingside;
+        castleWhiteQueenside = previousState.castleWhiteQueenside;
+        castleBlackKingside = previousState.castleBlackKingside;
+        castleBlackQueenside = previousState.castleBlackQueenside;
+        enPassantSquare = previousState.enPassantSquare;
         return -1;
     }
     if(turn == White) turn = Black;
@@ -196,8 +196,7 @@ int Board::updatePosition(int start, int end, side s, enumPiece p) {
     if(pieceCaptured || pawnMoved) halfmoveClock = 0;
     else halfmoveClock++;
     moveCount++;
-    saveBoardState();
-    std::cout<<"Move Count: "<<moveCount<<" FEN:"<<moveHistory.back()<<'\n';
+    saveBoardState(previousState);
     return 0;
 }
 
@@ -522,57 +521,121 @@ bool Board::kingAttacked(side s)
     return false;
 }
 
-void Board::saveBoardState() {
-    std::string FEN;
+void Board::saveBoardState(const MoveState& state)
+{
+    moveHistory.push_back(state);
+}
 
-    for (int i = 7; i >= 0; i--)
-    {
-        int emptySpaces = 0;
-        for (int j = 0; j < 8; j++)
-        {
-            int idx =i*8 + j;
-            int pieceIdx = getPieceAt(idx);
+void Board::loadFromFEN(const std::string& fen)
+{
+    std::istringstream input(fen);
+    std::string placement, activeColor, castling, enPassant;
+    int newHalfmoveClock, fullmoveNumber;
 
-            if(getSidePieces(White) & (1ULL << idx))
-            {
-                if(emptySpaces > 0)
-                {
-                    FEN += std::to_string(emptySpaces);
-                    emptySpaces = 0;
-                }
-                FEN += pieceMap[pieceIdx + 6];
-            }
-            else if(getSidePieces(Black) & (1ULL << idx))
-            {
-                if(emptySpaces > 0)
-                {
-                    FEN += std::to_string(emptySpaces);
-                    emptySpaces = 0;
-                }
-                FEN += pieceMap[pieceIdx];
-            }
-            else
-            {
-                emptySpaces++;
-            }
-        }
-        if(emptySpaces > 0)
-        {
-            FEN += std::to_string(emptySpaces);
-            emptySpaces = 0;
-        }
-        FEN += (i > 0) ? "/" : " ";
+    if (!(input >> placement >> activeColor >> castling >> enPassant >>
+          newHalfmoveClock >> fullmoveNumber) ||
+        activeColor.size() != 1 ||
+        (activeColor[0] != 'w' && activeColor[0] != 'b') ||
+        newHalfmoveClock < 0 || fullmoveNumber < 1) {
+        std::cerr << "Invalid FEN string" << '\n';
+        return;
     }
 
-    FEN += (turn == White) ? "w " : "b ";
-    FEN += (castleWhiteKingside ? "K" : "");
-    FEN += (castleWhiteQueenside ? "Q" : "");
-    FEN += (castleBlackKingside ? "k" : "");
-    FEN += (castleBlackQueenside ? "q" : "");
-    FEN += (castleWhiteKingside || castleWhiteQueenside || castleBlackKingside || castleBlackQueenside) ? " " : "- ";
-    FEN += (enPassantSquare != -1) ? std::string(1, 'a' + (enPassantSquare % 8)) + std::to_string((enPassantSquare / 8)) + " " : "- ";
-    FEN += std::to_string(halfmoveClock) + " ";
-    FEN += std::to_string(moveCount / 2);
+    u64 newPieceBB[8] = {};
+    int rank = 7;
+    int file = 0;
+    for (const char c : placement) {
+        if (c == '/') {
+            if (file != 8 || rank == 0) {
+                std::cerr << "Invalid FEN string" << '\n';
+                return;
+            }
+            --rank;
+            file = 0;
+            continue;
+        }
+        if (c >= '1' && c <= '8') {
+            file += c - '0';
+            if (file > 8) {
+                std::cerr << "Invalid FEN string" << '\n';
+                return;
+            }
+            continue;
+        }
 
-    moveHistory.push_back(FEN);
+        const std::string pieces = "pbnrqkPBNRQK";
+        const std::size_t piece = pieces.find(c);
+        if (piece == std::string::npos || file >= 8) {
+            std::cerr << "Invalid FEN string" << '\n';
+            return;
+        }
+
+        const int square = rank * 8 + file++;
+        const side color = piece < 6 ? Black : White;
+        const enumPiece type = static_cast<enumPiece>(piece % 6);
+        newPieceBB[color] |= 1ULL << square;
+        newPieceBB[type + 2] |= 1ULL << square;
+    }
+    if (rank != 0 || file != 8) {
+        std::cerr << "Invalid FEN string" << '\n';
+        return;
+    }
+
+    bool newCastleWhiteKingside = false;
+    bool newCastleWhiteQueenside = false;
+    bool newCastleBlackKingside = false;
+    bool newCastleBlackQueenside = false;
+    if (castling != "-") {
+        for (const char right : castling) {
+            switch (right) {
+                case 'K': newCastleWhiteKingside = true; break;
+                case 'Q': newCastleWhiteQueenside = true; break;
+                case 'k': newCastleBlackKingside = true; break;
+                case 'q': newCastleBlackQueenside = true; break;
+                default: std::cerr << "Invalid FEN string" << '\n'; return;
+            }
+        }
+    }
+
+    int newEnPassantSquare = -1;
+    if (enPassant != "-") {
+        if (enPassant.size() != 2 || enPassant[0] < 'a' || enPassant[0] > 'h' ||
+            (enPassant[1] != '3' && enPassant[1] != '6')) {
+            std::cerr << "Invalid FEN string" << '\n';
+            return;
+        }
+        const int targetSquare = (enPassant[1] - '1') * 8 + (enPassant[0] - 'a');
+        newEnPassantSquare = targetSquare + (activeColor[0] == 'b' ? 8 : -8);
+    }
+
+    std::copy(std::begin(newPieceBB), std::end(newPieceBB), pieceBB);
+    turn = activeColor[0] == 'w' ? White : Black;
+    castleWhiteKingside = newCastleWhiteKingside;
+    castleWhiteQueenside = newCastleWhiteQueenside;
+    castleBlackKingside = newCastleBlackKingside;
+    castleBlackQueenside = newCastleBlackQueenside;
+    enPassantSquare = newEnPassantSquare;
+    halfmoveClock = newHalfmoveClock;
+    moveCount = 2 * (fullmoveNumber - 1) + (turn == Black ? 1 : 0);
+    moveHistory.clear();
+}
+
+void Board::undoMove()
+{
+    if (moveHistory.empty()) {
+        std::cerr << "No moves to undo" << '\n';
+        return;
+    }
+
+    const MoveState previousState = moveHistory.back();
+    moveHistory.pop_back();
+    std::copy(std::begin(previousState.pieceBB), std::end(previousState.pieceBB), pieceBB);
+    castleWhiteKingside = previousState.castleWhiteKingside;
+    castleWhiteQueenside = previousState.castleWhiteQueenside;
+    castleBlackKingside = previousState.castleBlackKingside;
+    castleBlackQueenside = previousState.castleBlackQueenside;
+    enPassantSquare = previousState.enPassantSquare;
+    turn = previousState.turn;
+    moveCount = previousState.moveCount;
+    halfmoveClock = previousState.halfmoveClock;
 }
