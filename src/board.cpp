@@ -15,6 +15,9 @@ Board::Board()
           0x0800000000000008ULL,
           0x1000000000000010ULL
       } {
+        initKing();
+        initKnight();
+        initPawn();
         halfmoveClock = 0;
         moveCount = 0;
       }
@@ -29,18 +32,6 @@ u64 Board::getSidePieces(side s) const {
 
 u64 Board::getAllPieces() const {
     return pieceBB[White] | pieceBB[Black];
-}
-
-// Returns every square controlled by pawns of the requested color. Unlike
-// getPawnMoves(), these squares are included even when they are empty.
-u64 Board::getPawnAttacks(side color) const {
-    const u64 pawns = getPieces(color, Pawn);
-
-    if (color == White) {
-        return ((pawns & ~ColA) << 7) | ((pawns & ~ColH) << 9);
-    }
-
-    return ((pawns & ~ColA) >> 9) | ((pawns & ~ColH) >> 7);
 }
 
 void Board::removePieceAt(int idx) {
@@ -102,6 +93,13 @@ int Board::updatePosition(int start, int end, side s, enumPiece p) {
         return -1;
     }
 
+    const side enemy = (s == White) ? Black : White;
+    // A king is never captured in chess; check and checkmate determine the
+    // result. Keep attack generation independent from this rule.
+    if (getPieces(enemy, King) & endMask) {
+        return -1;
+    }
+
     if (castling) {
         // getKingMoves checks the rook, path, and castling right. The king
         // also may not castle out of, through, or into check.
@@ -118,8 +116,6 @@ int Board::updatePosition(int start, int end, side s, enumPiece p) {
             return -1;
         }
     }
-
-    side enemy = (s == White) ? Black : White;
 
     // An en passant opportunity lasts for exactly one opposing move.
     // Keep the square occupied by the pawn that advanced two squares so
@@ -209,7 +205,9 @@ u64 Board::getPawnMoves(int idx, side turn) const
     }
 
     const u64 allPieces = getAllPieces();
-    const u64 enemyPieces = getSidePieces(turn == White ? Black : White);
+    const side enemy = turn == White ? Black : White;
+    const u64 enemyPieces = getSidePieces(enemy);
+    possibleMoves = pawnAttacks[turn][idx] & enemyPieces;
     const int row = idx / 8;
     const int col = idx % 8;
     const int direction = turn == White ? 1 : -1;
@@ -229,23 +227,18 @@ u64 Board::getPawnMoves(int idx, side turn) const
             }
         }
 
-        // Pawns capture one square diagonally forward.
+        // En passant lands on an empty diagonal square, so it is handled
+        // separately from ordinary pawn captures above.
         for (const int captureCol : {col - 1, col + 1}) {
-            if (captureCol >= 0 && captureCol < 8) {
-                const int captureSquare = nextRow * 8 + captureCol;
-                if (enemyPieces & (1ULL << captureSquare)) {
-                    possibleMoves |= 1ULL << captureSquare;
-                }
+            if (captureCol < 0 || captureCol >= 8) {
+                continue;
+            }
 
-                // The en passant square stores the adjacent enemy pawn
-                // that just advanced two squares. The landing square is
-                // diagonally forward from this pawn and is empty.
-                const int adjacentSquare = row * 8 + captureCol;
-                if (enPassantSquare == adjacentSquare &&
-                    (getPieces(turn == White ? Black : White, Pawn) &
-                     (1ULL << adjacentSquare))) {
-                    possibleMoves |= 1ULL << captureSquare;
-                }
+            const int adjacentSquare = row * 8 + captureCol;
+            const int captureSquare = nextRow * 8 + captureCol;
+            if (enPassantSquare == adjacentSquare &&
+                (getPieces(enemy, Pawn) & (1ULL << adjacentSquare))) {
+                possibleMoves |= 1ULL << captureSquare;
             }
         }
     }
@@ -262,10 +255,10 @@ void Board::initKing()
         u64 bb = 0;
         for(int j = 0; j < 8; j++)
         {
-            int idx = j + d[j];
+            int idx = i + d[j];
             if(idx >= 0 && idx < 64 && (abs(i % 8 - idx % 8) <= 1))
             {
-                bb << idx;
+                bb |= (1ULL << idx);
             }
         }
         kingAttacks[i] = bb;
@@ -281,10 +274,10 @@ void Board::initKnight()
         u64 bb = 0;
         for(int j = 0; j < 8; j++)
         {
-            int idx = j + d[j];
+            int idx = i + d[j];
             if(idx >= 0 && idx < 64 && (abs(i % 8 - idx % 8) <= 2))
             {
-                bb << idx;
+                bb |= (1ULL << idx);
             }
         }
         knightAttacks[i] = bb;
@@ -306,7 +299,7 @@ void Board::initPawn()
             idx = i + dWhite[j];
             if(idx >= 0 && idx < 64 && abs(i % 8 - idx % 8) == 1)
             {
-                bb << idx;
+                bb |= (1ULL << idx);
             }
         }
         pawnAttacks[0][i] = bb;
@@ -321,7 +314,7 @@ void Board::initPawn()
             idx = i + dBlack[j];
             if(idx >= 0 && idx < 64 && abs(i % 8 - idx % 8) == 1)
             {
-                bb << idx;
+                bb |= (1ULL << idx);
             }
         }
         pawnAttacks[1][i] = bb;
@@ -330,7 +323,11 @@ void Board::initPawn()
 
 u64 Board::getKnightMoves(int idx, side turn) const
 {
-    return getSidePieces(turn) & ~knightAttacks[idx];
+    if (idx < 0 || idx >= 64) {
+        return 0;
+    }
+
+    return knightAttacks[idx] & ~getSidePieces(turn);
 }
 
 u64 Board::getBishopMoves(int idx, side turn) const
@@ -371,7 +368,7 @@ u64 Board::getBishopMoves(int idx, side turn) const
                 break;
             }
 
-            possibleMoves |= 1ULL << destination;
+            possibleMoves |= destinationMask;
 
             // Una pieza enemiga se puede capturar,
             // pero no se puede continuar detrás de ella.
@@ -423,7 +420,7 @@ u64 Board::getRookMoves(int idx, side turn) const
                 break;
             }
 
-            possibleMoves |= 1ULL << destination;
+            possibleMoves |= destinationMask;
 
             // Una pieza enemiga se puede capturar,
             // pero no se puede continuar detrás de ella.
@@ -479,6 +476,17 @@ u64 Board::getKingMoves(int idx, side turn) const
     }
 
     return possibleMoves;
+}
+
+u64 Board::getPawnAttacks(side color) const
+{
+    const u64 pawns = getPieces(color, Pawn);
+
+    if (color == White) {
+        return ((pawns & ~ColA) << 7) | ((pawns & ~ColH) << 9);
+    }
+
+    return ((pawns & ~ColA) >> 9) | ((pawns & ~ColH) >> 7);
 }
 
 bool Board::kingAttacked(side s)

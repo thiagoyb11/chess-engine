@@ -301,11 +301,38 @@ int negamax(Board cboard, int depth)
     return maxEval;
 }
 
+#include <future>
+
+u64 parallelPerft(Board& cboard, int depth) {
+    if (depth == 0) return 1;
+
+    const auto moves = generateAllMoves(cboard);
+    std::vector<std::future<u64>> jobs;
+
+    for (const auto& move : moves) {
+        jobs.push_back(std::async(std::launch::async, [&cboard, move, depth] {
+            Board local = cboard;  // independent board for this worker
+
+            if (getMove(move, local, local.getTurn()) != 0) {
+                return u64{0};     // pseudo-legal move rejected as illegal
+            }
+
+            return perft(local, depth - 1);
+        }));
+    }
+
+    u64 nodes = 0;
+    for (auto& job : jobs) {
+        nodes += job.get();
+    }
+    return nodes;
+}
+
 int main() {
     Board cboard;
     bool turn = 0;
 
-    std::cout<<perft(cboard, 6)<<'\n';
+    std::cout<<parallelPerft(cboard, 6)<<'\n';
     
     /*while(true){
         std::string move;
