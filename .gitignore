@@ -1,0 +1,28 @@
+# Build outputs
+build/
+bin/
+out/
+
+# C/C++ compiled files
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.exe
+
+# Common compiler and IDE artifacts
+.vscode/
+.vs/
+.idea/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# OS files
+.DS_Store
+Thumbs.db
