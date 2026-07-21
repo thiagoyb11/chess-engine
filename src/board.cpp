@@ -253,33 +253,84 @@ u64 Board::getPawnMoves(int idx, side turn) const
     return possibleMoves;
 }
 
-u64 Board::getKnightMoves(int idx, side turn) const
+void Board::initKing()
 {
-    u64 possibleMoves = 0;
-    if (idx < 0 || idx >= 64) {
-        return possibleMoves;
-    }
+    int d[8] = {1, -1, 8, -8, 9, -9, 7, -7};
 
-    const u64 ownPieces = getSidePieces(turn);
-    const int row = idx / 8;
-    const int col = idx % 8;
-    constexpr int offsets[8][2] = {
-        { 2,  1}, { 2, -1}, {-2,  1}, {-2, -1},
-        { 1,  2}, { 1, -2}, {-1,  2}, {-1, -2}
-    };
-
-    for (const auto& offset : offsets) {
-        const int targetRow = row + offset[0];
-        const int targetCol = col + offset[1];
-        if (targetRow >= 0 && targetRow < 8 && targetCol >= 0 && targetCol < 8) {
-            const int destination = targetRow * 8 + targetCol;
-            if ((ownPieces & (1ULL << destination)) == 0) {
-                possibleMoves |= 1ULL << destination;
+    for(int i = 0; i < 64; i++)
+    {
+        u64 bb = 0;
+        for(int j = 0; j < 8; j++)
+        {
+            int idx = j + d[j];
+            if(idx >= 0 && idx < 64 && (abs(i % 8 - idx % 8) <= 1))
+            {
+                bb << idx;
             }
         }
+        kingAttacks[i] = bb;
     }
+}
 
-    return possibleMoves;
+void Board::initKnight()
+{
+    int d[8] = {-17, -15, -10, -6, 6, 10, 15, 17};
+
+    for(int i = 0; i < 64; i++)
+    {
+        u64 bb = 0;
+        for(int j = 0; j < 8; j++)
+        {
+            int idx = j + d[j];
+            if(idx >= 0 && idx < 64 && (abs(i % 8 - idx % 8) <= 2))
+            {
+                bb << idx;
+            }
+        }
+        knightAttacks[i] = bb;
+    }
+}
+
+void Board::initPawn()
+{
+    int dWhite[2] = {7, 9};
+    int dBlack[2] = {-9, -7};
+    int idx = 0;
+    // Peones blancos
+    for(int i = 8; i < 56; i++)
+    {
+        u64 bb = 0;
+
+        for(int j = 0; j < 2; j++)
+        {
+            idx = i + dWhite[j];
+            if(idx >= 0 && idx < 64 && abs(i % 8 - idx % 8) == 1)
+            {
+                bb << idx;
+            }
+        }
+        pawnAttacks[0][i] = bb;
+    }
+    // Peones negros
+    for(int i = 8; i < 56; i++)
+    {
+        u64 bb = 0;
+
+        for(int j = 0; j < 2; j++)
+        {
+            idx = i + dBlack[j];
+            if(idx >= 0 && idx < 64 && abs(i % 8 - idx % 8) == 1)
+            {
+                bb << idx;
+            }
+        }
+        pawnAttacks[1][i] = bb;
+    }
+}
+
+u64 Board::getKnightMoves(int idx, side turn) const
+{
+    return getSidePieces(turn) & ~knightAttacks[idx];
 }
 
 u64 Board::getBishopMoves(int idx, side turn) const
@@ -400,26 +451,7 @@ u64 Board::getKingMoves(int idx, side turn) const
         return possibleMoves;
     }
 
-    const u64 ownPieces = getSidePieces(turn);
-    const int row = idx / 8;
-    const int col = idx % 8;
-
-    for (int rowOffset = -1; rowOffset <= 1; ++rowOffset) {
-        for (int colOffset = -1; colOffset <= 1; ++colOffset) {
-            if (rowOffset == 0 && colOffset == 0) {
-                continue;
-            }
-
-            const int targetRow = row + rowOffset;
-            const int targetCol = col + colOffset;
-            if (targetRow >= 0 && targetRow < 8 && targetCol >= 0 && targetCol < 8) {
-                const int destination = targetRow * 8 + targetCol;
-                if ((ownPieces & (1ULL << destination)) == 0) {
-                    possibleMoves |= 1ULL << destination;
-                }
-            }
-        }
-    }
+    possibleMoves = kingAttacks[idx] & ~getSidePieces(turn);
 
     const int kingStart = turn == White ? 4 : 60;
     const int kingsideRook = turn == White ? 7 : 63;

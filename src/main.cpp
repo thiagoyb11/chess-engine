@@ -2,11 +2,15 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#define INF INT32_MAX;
+
 void printBoard(const Board& cboard);
 int makeMove(std::string move, Board& cboard, Board::enumPiece p, Board::side color);
 int decode(const std::string& pos);
 int getMove(std::string move, Board& cboard, Board::side turn);
 u64 getPossibleMoves(const Board& cboard, Board::enumPiece p, int index);
+
+
 
 void printBoard(const Board& cboard) {
     char boardGraph[8][8];
@@ -231,6 +235,70 @@ int makeMove(std::string move, Board& cboard, Board::enumPiece p, Board::side co
     int returnVal = cboard.updatePosition(idxStart, idxEnd, color, p);
 
     return returnVal;
+}
+
+int evalPosition(Board cboard, Board::side s)
+{
+    int score = 0;
+    u64 allPieces = cboard.getAllPieces();
+    u64 sidePieces = cboard.getSidePieces(s);
+    
+    for(int i = 0; i < 64; i++)
+    {
+        if(allPieces & (1ULL << i))
+        {
+            int pieceIdx = cboard.getPieceAt(i);
+            Board::enumPiece p = static_cast<Board::enumPiece>(pieceIdx);
+            int pieceValue = 0;
+
+            switch(p)
+            {
+                case Board::Pawn:
+                    pieceValue = 100;
+                    break;
+                case Board::Knight:
+                    pieceValue = 300;
+                    break;
+                case Board::Bishop:
+                    pieceValue = 300;
+                    break;
+                case Board::Rook:
+                    pieceValue = 500;
+                    break;
+                case Board::Queen:
+                    pieceValue = 900;
+                    break;
+                case Board::King:
+                    pieceValue = 1000;
+                    break;
+            }
+
+            if(sidePieces & (1ULL << i))
+            {
+                score += pieceValue;
+            }
+            else
+            {
+                score -= pieceValue;
+            }
+        }
+    }
+    return score;
+}
+
+int negamax(Board cboard, int depth)
+{
+    if(depth == 0) return evalPosition(cboard, cboard.getTurn());
+    int maxEval = -INF;
+
+    std::vector<std::string> moves = generateAllMoves(cboard);
+
+    for(auto x : moves)
+    {
+        int score = -negamax(cboard, depth - 1);
+        if(score > maxEval) maxEval = score;
+    }
+    return maxEval;
 }
 
 int main() {
