@@ -10,12 +10,10 @@
 #define INF INT32_MAX;
 
 void printBoard(const Board& cboard);
-int makeMove(std::string move, Board& cboard, Board::enumPiece p, Board::side color);
+int makeMove(u64 idxStart, u64 idxEnd, Board& cboard, Board::enumPiece p, Board::side color);
 int decode(const std::string& pos);
-int getMove(std::string move, Board& cboard, Board::side turn);
+int getMove(u64 idxStart, u64 idxEnd, Board& cboard, Board::side turn);
 u64 getPossibleMoves(const Board& cboard, Board::enumPiece p, int index);
-
-
 
 void printBoard(const Board& cboard) {
     char boardGraph[8][8];
@@ -125,11 +123,9 @@ u64 getPossibleMoves(const Board& cboard, Board::enumPiece p, int index)
     return possibleMoves;
 }
 
-int getMove(std::string move, Board& cboard, Board::side turn)
+int getMove(u64 idxStart, u64 idxEnd, Board& cboard, Board::side turn)
 {
     Board::enumPiece p;
-    int idxStart = decode(move.substr(0, 2));
-    int idxEnd = decode(move.substr(2, 2));
     int pieceIdx = cboard.getPieceAt(idxStart);
     if(pieceIdx != -1)
     {
@@ -147,7 +143,7 @@ int getMove(std::string move, Board& cboard, Board::side turn)
 
         // Chequear si el movimiento es valido (el destino esta en el bitboard).
         if (idxEnd >= 0 && idxEnd < 64 && (possibleMoves & (1ULL << idxEnd))) {
-            int returnVal = makeMove(move, cboard, p, turn);
+            int returnVal = makeMove(idxStart, idxEnd, cboard, p, turn);
             return returnVal;
         }
         return -1;
@@ -159,10 +155,11 @@ int getMove(std::string move, Board& cboard, Board::side turn)
     
 };
 
-std::vector<std::string> generateAllMoves(Board& cboard)
+std::vector<u64> generateAllMoves(Board& cboard)
 {
-    u64 sidePieces = cboard.getSidePieces(cboard.getTurn());
-    std::vector<std::string> movesVector;
+    Board::side turn = cboard.getTurn();
+    u64 sidePieces = cboard.getSidePieces(turn);
+    std::vector<u64> movesVector;
 
     for(int i = 0; i < 64; i++)
     {
@@ -175,37 +172,26 @@ std::vector<std::string> generateAllMoves(Board& cboard)
             switch(p)
             {
                 case Board::enumPiece::Pawn:
-                    moves = cboard.getPawnMoves(i, cboard.getTurn());
+                    moves = cboard.getPawnMoves(i, turn);
                     break;
                 case Board::enumPiece::Knight:
-                    moves = cboard.getKnightMoves(i, cboard.getTurn());
+                    moves = cboard.getKnightMoves(i, turn);
                     break;
                 case Board::enumPiece::Bishop:
-                    moves = cboard.getBishopMoves(i, cboard.getTurn());
+                    moves = cboard.getBishopMoves(i, turn);
                     break;
                 case Board::enumPiece::Rook:
-                    moves = cboard.getRookMoves(i, cboard.getTurn());
+                    moves = cboard.getRookMoves(i, turn);
                     break;
                 case Board::enumPiece::Queen:
-                    moves = cboard.getQueenMoves(i, cboard.getTurn());
+                    moves = cboard.getQueenMoves(i, turn);
                     break;
                 case Board::enumPiece::King:
-                    moves = cboard.getKingMoves(i, cboard.getTurn());
+                    moves = cboard.getKingMoves(i, turn);
                     break;
             }
-
-            for(int j = 0; j < 64; j++)
-            {
-                if(moves & (1ULL << j))
-                {
-                    std::string move = "....";
-                    move[0] = 'a' + (i % 8);
-                    move[1] = '1' + (i / 8);
-                    move[2] = 'a' + (j % 8);
-                    move[3] = '1' + (j / 8);
-                    movesVector.push_back(move);
-                }
-            }
+            movesVector.push_back(i);
+            movesVector.push_back(moves);
         }
     }
     return movesVector;
@@ -216,28 +202,31 @@ u64 perft(Board& cboard, int depth)
     if(depth == 0) return 1;
 
     u64 nodes = 0;
-    std::vector<std::string> moves = generateAllMoves(cboard);
+    std::vector<u64> moves = generateAllMoves(cboard);
 
-    for(const std::string& move : moves)
+    for(int i = 0; i < moves.size(); i += 2)
     {
         Board::side turnColor = cboard.getTurn();
-        int returnVal = getMove(move, cboard, turnColor);
-        if(returnVal == 0)
+        for(int j = 0; j < 64; j++)
         {
-            nodes += perft(cboard, depth - 1);
-            // Undo the move
-            cboard.undoMove();
+            if(1ULL << j & moves[i + 1])
+            {
+                int returnVal = getMove(moves[i], j, cboard, turnColor);
+                if(returnVal == 0)
+                {
+                    nodes += perft(cboard, depth - 1);
+                    // Undo the move
+                    cboard.undoMove();
+                }
+            }
         }
     }
 
     return nodes;
 }
 
-int makeMove(std::string move, Board& cboard, Board::enumPiece p, Board::side color) {
-    int idxStart = decode(move.substr(0, 2));
-    int idxEnd = decode(move.substr(2, 2));
-    
-    int returnVal = cboard.updatePosition(idxStart, idxEnd, color, p);
+int makeMove(u64 startIdx, u64 endIdx, Board& cboard, Board::enumPiece p, Board::side color) {
+    int returnVal = cboard.updatePosition(startIdx, endIdx, color, p);
 
     return returnVal;
 }
@@ -291,7 +280,7 @@ int evalPosition(Board cboard, Board::side s)
     return score;
 }
 
-int negamax(Board cboard, int depth)
+/*int negamax(Board cboard, int depth)
 {
     if(depth == 0) return evalPosition(cboard, cboard.getTurn());
     int maxEval = -INF;
@@ -304,7 +293,7 @@ int negamax(Board cboard, int depth)
         if(score > maxEval) maxEval = score;
     }
     return maxEval;
-}
+}*/
 
 #ifdef _WIN32
 struct ParallelPerftJob {
@@ -324,7 +313,7 @@ unsigned __stdcall runParallelPerftJob(void* rawJob) {
 }
 #endif
 
-u64 parallelPerft(Board& cboard, int depth) {
+/*u64 parallelPerft(Board& cboard, int depth) {
     if (depth == 0) return 1;
 
     // Take one snapshot before launching workers.  Each worker must operate
@@ -373,13 +362,14 @@ u64 parallelPerft(Board& cboard, int depth) {
         nodes += result;
     }
     return nodes;
-}
+}*/
 
 int main() {
     Board cboard;
+
     bool turn = 0;
 
-    std::cout<<parallelPerft(cboard, 7)<<'\n';
+    std::cout<<perft(cboard, 6)<<'\n';
     
     /*while(true){
         std::string move;

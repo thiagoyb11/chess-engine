@@ -20,6 +20,10 @@ private:
     std::array<int, 64> rookRelevantBits{};
     std::array<std::array<u64, 4096>, 64> rookAttackTable{};
 
+    std::array<u64, 64> bishopMasks{};
+    std::array<int, 64> bishopRelevantBits{};
+    std::array<std::array<u64, 512>, 64> bishopAttackTable{};
+
     static u64 randomU64();
     static u64 randomMagicCandidate();
     
@@ -40,11 +44,17 @@ public:
 
     u64 maskBishopRelevant(int square) const;
     u64 maskRookRelevant(int square) const;
-    u64 bishopAttacks(int square, u64 blockers) const;
+    u64 bishopAttacks(int square, u64 occupancy) const;
+    u64 bishopAttacksRayTraced(int square, u64 blockers) const;
     u64 rookAttacks(int square, u64 occupancy) const;
     u64 rookAttacksRayTraced(int square, u64 blockers) const;
     u64 findMagicNumber(int square, int relevantBits, bool bishop) const;
+
     u64 getRookMask(int square) {return rookMasks[square];};
     u64 getRookAttacks(int square, int index) {return rookAttackTable[square][index];};
     u64 getRookMagics(int square) {return rookMagics[square];};
+
+    u64 getBishopMask(int square) {return bishopMasks[square];};
+    u64 getBishopAttacks(int square, int index) {return bishopAttackTable[square][index];};
+    u64 getBishopMagics(int square) {return bishopMagics[square];};
 };

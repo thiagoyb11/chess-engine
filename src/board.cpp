@@ -316,70 +316,42 @@ bool Board::kingAttacked(side s)
     side enemySide = static_cast<side>(!s);
     u64 kingPos = getPieces(s, King);
 
-    u64 enemyKnights = getPieces(enemySide, Knight);
-    u64 enemyBishops = getPieces(enemySide, Bishop);
-    u64 enemyRooks = getPieces(enemySide, Rook);
-    u64 enemyQueens = getPieces(enemySide, Queen);
-    u64 enemyKing = getPieces(enemySide, King);
-    u64 res;
+    u64 enemyPieces = getSidePieces(enemySide);
+    while (enemyPieces) {
+        const int square = __builtin_ctzll(enemyPieces);
+        enemyPieces &= enemyPieces - 1;
 
-    if (getPawnAttacks(enemySide) & kingPos) return true;
+        const enumPiece piece = static_cast<enumPiece>(getPieceAt(square));
+        u64 attacks = 0;
 
-    for(int i = 0; i < 64; i++)
-    {
-        if(enemyKnights & (1ULL << i))
-        {
-            res = getKnightMoves(i, enemySide);
-            if(res & kingPos) return true;
-        }
-    }
-    for(int i = 0; i < 64; i++)
-    {
-        if(enemyBishops & (1ULL << i))
-        {
-            res = getBishopMoves(i, enemySide);
-            if(res & kingPos) return true;
-        }
-    }
-    for(int i = 0; i < 64; i++)
-    {
-        if(enemyRooks & (1ULL << i))
-        {
-            res = getRookMoves(i, enemySide);
-            if(res & kingPos) return true;
-        }
-    }
-    for(int i = 0; i < 64; i++)
-    {
-        if(enemyQueens & (1ULL << i))
-        {
-            res = getQueenMoves(i, enemySide);
-            if(res & kingPos) return true;
-        }
-    }
-    for (int i = 0; i < 64; ++i) {
-        if ((enemyKing & (1ULL << i)) == 0) {
-            continue;
+        switch (piece) {
+        case Pawn:
+            // Pawn moves include forward pushes, which are not attacks.
+            attacks = attackTables.pawnAttacks(static_cast<int>(enemySide), square);
+            break;
+        case Knight:
+            attacks = getKnightMoves(square, enemySide);
+            break;
+        case Bishop:
+            attacks = getBishopMoves(square, enemySide);
+            break;
+        case Rook:
+            attacks = getRookMoves(square, enemySide);
+            break;
+        case Queen:
+            attacks = getQueenMoves(square, enemySide);
+            break;
+        case King:
+            // King moves may include castling, which is not an attack.
+            attacks = attackTables.kingAttacks(square);
+            break;
         }
 
-        const int kingRow = i / 8;
-        const int kingCol = i % 8;
-        for (int rowOffset = -1; rowOffset <= 1; ++rowOffset) {
-            for (int colOffset = -1; colOffset <= 1; ++colOffset) {
-                if (rowOffset == 0 && colOffset == 0) {
-                    continue;
-                }
-
-                const int targetRow = kingRow + rowOffset;
-                const int targetCol = kingCol + colOffset;
-                if (targetRow >= 0 && targetRow < 8 &&
-                    targetCol >= 0 && targetCol < 8 &&
-                    (kingPos & (1ULL << (targetRow * 8 + targetCol)))) {
-                    return true;
-                }
-            }
+        if (attacks & kingPos) {
+            return true;
         }
     }
+
     return false;
 }
 

@@ -41,6 +41,29 @@ MagicBitboards::MagicBitboards()
                 rookAttacksRayTraced(square, blockers);
         }
     }
+
+    for (int square = 0; square < 64; ++square) {
+        bishopMasks[square] = maskBishopRelevant(square);
+        bishopRelevantBits[square] = __builtin_popcountll(bishopMasks[square]);
+
+        const int patternCount = 1 << bishopRelevantBits[square];
+
+        for (int pattern = 0; pattern < patternCount; ++pattern) {
+            const u64 blockers = setOccupancy(
+                pattern,
+                bishopRelevantBits[square],
+                bishopMasks[square]
+            );
+
+            const int magicIndex = static_cast<int>(
+                (blockers * bishopMagics[square]) >>
+                (64 - bishopRelevantBits[square])
+            );
+
+            bishopAttackTable[square][magicIndex] =
+                bishopAttacksRayTraced(square, blockers);
+        }
+    }
 }
 
 void MagicBitboards::initializeLeaperAttacks()
@@ -162,7 +185,7 @@ u64 MagicBitboards::maskRookRelevant(int square) const
     return mask;
 }
 
-u64 MagicBitboards::bishopAttacks(int square, u64 blockers) const
+u64 MagicBitboards::bishopAttacksRayTraced(int square, u64 blockers) const
 {
     if (!validSquare(square)) return 0ULL;
 
@@ -237,9 +260,12 @@ u64 MagicBitboards::findMagicNumber(int square, int relevantBits, bool bishop) c
 
     for (int index = 0; index < occupancyCount; ++index) {
         occupancies[index] = setOccupancy(index, relevantBits, mask);
+        // A magic number must be validated against the independent ray tracer.
+        // Using the magic lookup here makes the bishop search self-referential:
+        // collisions can appear valid simply because the current table is wrong.
         attacks[index] = bishop
-            ? bishopAttacks(square, occupancies[index])
-            : rookAttacks(square, occupancies[index]);
+            ? bishopAttacksRayTraced(square, occupancies[index])
+            : rookAttacksRayTraced(square, occupancies[index]);
     }
 
     for (int attempt = 0; attempt < 100000000; ++attempt) {
@@ -262,6 +288,18 @@ u64 MagicBitboards::findMagicNumber(int square, int relevantBits, bool bishop) c
         if (!failed) return magic;
     }
     throw std::runtime_error("No magic number found");
+}
+
+u64 MagicBitboards::bishopAttacks(int square, u64 occupancy) const
+{
+    const u64 blockers = occupancy & bishopMasks[square];
+
+    const int index = static_cast<int>(
+        (blockers * bishopMagics[square]) >>
+        (64 - bishopRelevantBits[square])
+    );
+
+    return bishopAttackTable[square][index];
 }
 
 u64 MagicBitboards::rookAttacks(int square, u64 occupancy) const
@@ -344,68 +382,68 @@ const u64 MagicBitboards::rookMagics[64] = {
 };
 
 const u64 MagicBitboards::bishopMagics[64] = {
-    0x404200a04031010ULL,
-    0x10210204004642ULL,
-    0x22180108208050ULL,
-    0x82a00a0812100ULL,
-    0x92121008404444ULL,
-    0x402088200880c008ULL,
-    0xc80a061920488000ULL,
-    0x42205290c100c00ULL,
-    0x800040848080080ULL,
-    0x200281021220220ULL,
-    0x8811102410802400ULL,
-    0x8009080600440100ULL,
-    0x20820210200000ULL,
-    0x2108210148400540ULL,
-    0x8400008611504084ULL,
-    0x4220442280400ULL,
-    0x804044104040408ULL,
-    0x804400808080040ULL,
-    0x10200804882008ULL,
-    0x1024c802404015ULL,
-    0x29000290400805ULL,
-    0x7204110082002ULL,
-    0xa402100c010c2200ULL,
-    0x20a2013022010401ULL,
-    0x8032401020048400ULL,
-    0x82000c2040108ULL,
-    0x404404014040088ULL,
-    0x40104044004080ULL,
-    0x4800840008802002ULL,
-    0x2a020001229002ULL,
-    0x404011000880188ULL,
-    0xa801020040220122ULL,
-    0x201901000400400ULL,
-    0x8802101000848120ULL,
-    0x800168800101140ULL,
-    0x183010800990040ULL,
-    0x422208400020020ULL,
-    0x1080a01002200ULL,
-    0xc18008502008840ULL,
-    0x45112204a0080ULL,
-    0x9044a0021040ULL,
-    0x8002080442010500ULL,
-    0x40c20040402400ULL,
-    0x1002a018000100ULL,
-    0x8002083010100100ULL,
-    0x201a4048404200ULL,
-    0x1044013801008200ULL,
-    0x14488881000204ULL,
-    0x9000580a08600221ULL,
-    0x2010141100040ULL,
-    0x10088044a80ULL,
-    0x2001220883580ULL,
-    0x400002020410440ULL,
-    0x8004041004084020ULL,
-    0x8080800841850ULL,
-    0x80414180a122884ULL,
-    0x324610812101208ULL,
-    0x1212010c0a80ULL,
-    0xb00402804a080404ULL,
-    0x6302010400aa0801ULL,
-    0x9001104a08208ULL,
-    0x100400520040902ULL,
-    0x22020a4828008408ULL,
-    0x90101000a02540ULL
+    18020183864017673ULL,
+    5075367216320517ULL,
+    49579198202773633ULL,
+    11294459660861504ULL,
+    145245623539466240ULL,
+    576603758608255044ULL,
+    563518500241537ULL,
+    4638745008216736256ULL,
+    146939489917861968ULL,
+    10378547858260953856ULL,
+    5787143252952023552ULL,
+    91343304033337344ULL,
+    2207885819905ULL,
+    1157990287604711424ULL,
+    4436718608384ULL,
+    9369811953356703744ULL,
+    256808568823555144ULL,
+    9236918056884961888ULL,
+    238690867240632339ULL,
+    1731635158416637960ULL,
+    865819339064082980ULL,
+    18296019521176576ULL,
+    617133895062676098ULL,
+    583787902291542564ULL,
+    2256204856627216ULL,
+    144751274343273492ULL,
+    578721349556519492ULL,
+    27039466036150464ULL,
+    297520152043339776ULL,
+    721706513253015558ULL,
+    14143708563567149568ULL,
+    865817303324838400ULL,
+    4904723536727252992ULL,
+    2596334016168854032ULL,
+    70644729905664ULL,
+    7061646416959504512ULL,
+    9150144356548872ULL,
+    1161966368581550720ULL,
+    288586620139014148ULL,
+    2254085307777282ULL,
+    2595217161197717536ULL,
+    1319837334060994560ULL,
+    3749256329034991616ULL,
+    18577490867948544ULL,
+    954798442998142080ULL,
+    144415359095570947ULL,
+    2252933693448722ULL,
+    2254016018956885ULL,
+    41377466110967816ULL,
+    564052283899904ULL,
+    72062551640375296ULL,
+    1117237284872ULL,
+    585749564008202240ULL,
+    6734575894528ULL,
+    290491041919811588ULL,
+    10143553180729664ULL,
+    108227695491449860ULL,
+    63050953263317520ULL,
+    595742913506353668ULL,
+    5044068021300364353ULL,
+    288230427763688448ULL,
+    2305843387355916800ULL,
+    72384286631919716ULL,
+    18016631926038592ULL
 };
