@@ -7,6 +7,11 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <iomanip>
+#include <chrono>
+#ifndef _WIN32
+#include <future>
+#endif
 #define INF INT32_MAX;
 
 void printBoard(const Board& cboard);
@@ -161,38 +166,37 @@ std::vector<u64> generateAllMoves(Board& cboard)
     u64 sidePieces = cboard.getSidePieces(turn);
     std::vector<u64> movesVector;
 
-    for(int i = 0; i < 64; i++)
-    {
-        if(sidePieces & (1ULL << i))
-        {
-            int pieceIdx = cboard.getPieceAt(i);
-            Board::enumPiece p = static_cast<Board::enumPiece>(pieceIdx);
-            u64 moves = 0;
+    while (sidePieces != 0) {
+        const int i = __builtin_ctzll(sidePieces);
+        sidePieces &= sidePieces - 1;
 
-            switch(p)
-            {
-                case Board::enumPiece::Pawn:
-                    moves = cboard.getPawnMoves(i, turn);
-                    break;
-                case Board::enumPiece::Knight:
-                    moves = cboard.getKnightMoves(i, turn);
-                    break;
-                case Board::enumPiece::Bishop:
-                    moves = cboard.getBishopMoves(i, turn);
-                    break;
-                case Board::enumPiece::Rook:
-                    moves = cboard.getRookMoves(i, turn);
-                    break;
-                case Board::enumPiece::Queen:
-                    moves = cboard.getQueenMoves(i, turn);
-                    break;
-                case Board::enumPiece::King:
-                    moves = cboard.getKingMoves(i, turn);
-                    break;
-            }
-            movesVector.push_back(i);
-            movesVector.push_back(moves);
+        int pieceIdx = cboard.getPieceAt(i);
+        Board::enumPiece p = static_cast<Board::enumPiece>(pieceIdx);
+        u64 moves = 0;
+
+        switch(p)
+        {
+            case Board::enumPiece::Pawn:
+                moves = cboard.getPawnMoves(i, turn);
+                break;
+            case Board::enumPiece::Knight:
+                moves = cboard.getKnightMoves(i, turn);
+                break;
+            case Board::enumPiece::Bishop:
+                moves = cboard.getBishopMoves(i, turn);
+                break;
+            case Board::enumPiece::Rook:
+                moves = cboard.getRookMoves(i, turn);
+                break;
+            case Board::enumPiece::Queen:
+                moves = cboard.getQueenMoves(i, turn);
+                break;
+            case Board::enumPiece::King:
+                moves = cboard.getKingMoves(i, turn);
+                break;
         }
+        movesVector.push_back(i);
+        movesVector.push_back(moves);
     }
     return movesVector;
 }
@@ -298,14 +302,15 @@ int evalPosition(Board cboard, Board::side s)
 #ifdef _WIN32
 struct ParallelPerftJob {
     Board board;
-    std::string move;
+    u64 startIdx;
+    u64 endIdx;
     int depth;
     u64* result;
 };
 
 unsigned __stdcall runParallelPerftJob(void* rawJob) {
     auto* job = static_cast<ParallelPerftJob*>(rawJob);
-    if (getMove(job->move, job->board, job->board.getTurn()) == 0) {
+    if (getMove(job->startIdx, job->endIdx, job->board, job->board.getTurn()) == 0) {
         *job->result = perft(job->board, job->depth - 1);
     }
     delete job;
@@ -313,7 +318,7 @@ unsigned __stdcall runParallelPerftJob(void* rawJob) {
 }
 #endif
 
-/*u64 parallelPerft(Board& cboard, int depth) {
+u64 parallelPerft(Board& cboard, int depth) {
     if (depth == 0) return 1;
 
     // Take one snapshot before launching workers.  Each worker must operate
@@ -321,12 +326,31 @@ unsigned __stdcall runParallelPerftJob(void* rawJob) {
     // reference while other workers are running.
     Board root = cboard;
     const auto moves = generateAllMoves(root);
-    std::vector<u64> results(moves.size(), 0);
+
+    // There is one result per legal root move, not one result per piece.
+    // Keeping the destination as a square index is also important because
+    // getMove() expects an index, not a one-bit bitboard.
+    struct RootMove {
+        u64 startIdx;
+        u64 endIdx;
+    };
+    std::vector<RootMove> rootMoves;
+    for (std::size_t i = 0; i < moves.size(); i += 2) {
+        for (int j = 0; j < 64; ++j) {
+            if (moves[i + 1] & (1ULL << j)) {
+                rootMoves.push_back({moves[i], static_cast<u64>(j)});
+            }
+        }
+    }
+    std::vector<u64> results(rootMoves.size(), 0);
 
 #ifdef _WIN32
     std::vector<HANDLE> jobs;
-    for (std::size_t i = 0; i < moves.size(); ++i) {
-        auto* job = new ParallelPerftJob{root, moves[i], depth, &results[i]};
+    for (std::size_t i = 0; i < rootMoves.size(); ++i) {
+        const RootMove move = rootMoves[i];
+        auto* job = new ParallelPerftJob{
+            root, move.startIdx, move.endIdx, depth, &results[i]
+        };
         HANDLE handle = reinterpret_cast<HANDLE>(_beginthreadex(
             nullptr, 0, runParallelPerftJob, job, 0, nullptr));
         if (handle != nullptr) {
@@ -335,7 +359,7 @@ unsigned __stdcall runParallelPerftJob(void* rawJob) {
             delete job;
             // Preserve correctness if the OS refuses to create a worker.
             Board local = root;
-            if (getMove(moves[i], local, local.getTurn()) == 0) {
+            if (getMove(move.startIdx, move.endIdx, local, local.getTurn()) == 0) {
                 results[i] = perft(local, depth - 1);
             }
         }
@@ -346,14 +370,28 @@ unsigned __stdcall runParallelPerftJob(void* rawJob) {
         CloseHandle(job);
     }
 #else
-    // Keep a portable synchronous fallback for non-Windows builds.  The
-    // Windows build uses native workers because the bundled MinGW runtime
-    // does not provide std::thread/std::future.
-    for (std::size_t i = 0; i < moves.size(); ++i) {
-        Board local = root;
-        if (getMove(moves[i], local, local.getTurn()) == 0) {
-            results[i] = perft(local, depth - 1);
-        }
+    // macOS/Linux: launch one asynchronous task per root move. Each task
+    // receives its own Board copy, so no board state is shared between
+    // workers.
+    std::vector<std::future<u64>> futures;
+    futures.reserve(rootMoves.size());
+
+    for (std::size_t i = 0; i < rootMoves.size(); ++i) {
+        const RootMove move = rootMoves[i];
+        futures.emplace_back(std::async(
+            std::launch::async,
+            [root, move, depth]() mutable -> u64 {
+                if (getMove(move.startIdx, move.endIdx,
+                            root, root.getTurn()) == 0) {
+                    return perft(root, depth - 1);
+                }
+                return 0;
+            }
+        ));
+    }
+
+    for (std::size_t i = 0; i < futures.size(); ++i) {
+        results[i] = futures[i].get();
     }
 #endif
 
@@ -362,22 +400,24 @@ unsigned __stdcall runParallelPerftJob(void* rawJob) {
         nodes += result;
     }
     return nodes;
-}*/
+}
 
 int main() {
     Board cboard;
 
     bool turn = 0;
 
-    std::cout<<perft(cboard, 6)<<'\n';
-    
-    /*while(true){
-        std::string move;
-        std::cin>>move;
-        Board::side turnColor = turn == 0 ? Board::White : Board::Black;
-        int returnVal = getMove(move, cboard, turnColor);
-        if(returnVal == 0) turn = !turn;
-    } */
+    auto start = std::chrono::high_resolution_clock::now();
+    long long nodes = parallelPerft(cboard, 7);
+    std::cout<<nodes<<'\n';
 
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    float duration_s = duration.count() / 1000.0;
+    std::cout<<"Execution time: "<<duration_s<<"s\n";
+
+    float nodeRate = nodes / duration_s;
+
+    std::cout<<std::fixed<<std::setprecision(2)<<nodeRate<<" Nodes/s"<<'\n';
     return 0;
 }

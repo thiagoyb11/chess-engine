@@ -20,7 +20,7 @@ Desde la raíz del proyecto:
 
 ```bash
 mkdir -p build
-g++ -std=c++17 -O2 -Wall -Wextra src/main.cpp src/board.cpp -o build/chess-engine
+g++ -std=c++17 -O2 -Wall -Wextra src/main.cpp src/board.cpp src/magic_bitboards.cpp -o build/chess-engine
 ```
 
 En Windows con MinGW, el ejecutable puede generarse como `build/chess-engine.exe`.

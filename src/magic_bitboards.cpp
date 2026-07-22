@@ -15,6 +15,10 @@ bool validSquare(int square)
 }
 }
 
+// Required by older GCC versions when the constexpr arrays are odr-used.
+constexpr std::array<std::size_t, 64> MagicBitboards::rookTableSizes;
+constexpr std::array<std::size_t, 64> MagicBitboards::bishopTableSizes;
+
 MagicBitboards::MagicBitboards()
 {
     initializeLeaperAttacks();
@@ -22,7 +26,14 @@ MagicBitboards::MagicBitboards()
     for (int square = 0; square < 64; ++square) {
         rookMasks[square] = maskRookRelevant(square);
         rookRelevantBits[square] = __builtin_popcountll(rookMasks[square]);
+        rookAttackTable[square] = std::make_unique<u64[]>(rookTableSizes[square]);
 
+        bishopMasks[square] = maskBishopRelevant(square);
+        bishopRelevantBits[square] = __builtin_popcountll(bishopMasks[square]);
+        bishopAttackTable[square] = std::make_unique<u64[]>(bishopTableSizes[square]);
+    }
+
+    for (int square = 0; square < 64; ++square) {
         const int patternCount = 1 << rookRelevantBits[square];
 
         for (int pattern = 0; pattern < patternCount; ++pattern) {
@@ -43,9 +54,6 @@ MagicBitboards::MagicBitboards()
     }
 
     for (int square = 0; square < 64; ++square) {
-        bishopMasks[square] = maskBishopRelevant(square);
-        bishopRelevantBits[square] = __builtin_popcountll(bishopMasks[square]);
-
         const int patternCount = 1 << bishopRelevantBits[square];
 
         for (int pattern = 0; pattern < patternCount; ++pattern) {
