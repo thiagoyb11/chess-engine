@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
-#include <bits/stdc++.h>
+#include <sstream>
+#include <string>
+#include <vector>
 
 using u64 = std::uint64_t;
 
@@ -26,9 +28,6 @@ public:
     u64 getRookMoves(int idx, side turn) const;
     u64 getQueenMoves(int idx, side turn) const;
     u64 getKingMoves(int idx, side turn) const;
-    void initKing();
-    void initKnight();
-    void initPawn();
     bool kingAttacked(side s);
     void loadFromFEN(const std::string& fen);
     side getTurn() const { return turn; }
@@ -61,7 +60,4 @@ private:
     int moveCount;
     std::vector<MoveState> moveHistory;
     int halfmoveClock;
-    u64 knightAttacks[64]{};
-    u64 kingAttacks[64]{};
-    u64 pawnAttacks[2][64]{};
 };

@@ -1,9 +1,12 @@
 #include "board.h"
+#include "magic_bitboards.h"
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
-static constexpr u64 ColA = 0x0101010101010101ULL;
-static constexpr u64 ColH = 0x8080808080808080ULL;
+
+namespace {
+const MagicBitboards attackTables;
+}
 Board::Board()
     : pieceBB{
           0x000000000000FFFFULL,
@@ -15,9 +18,6 @@ Board::Board()
           0x0800000000000008ULL,
           0x1000000000000010ULL
       } {
-        initKing();
-        initKnight();
-        initPawn();
         halfmoveClock = 0;
         moveCount = 0;
       }
@@ -207,7 +207,7 @@ u64 Board::getPawnMoves(int idx, side turn) const
     const u64 allPieces = getAllPieces();
     const side enemy = turn == White ? Black : White;
     const u64 enemyPieces = getSidePieces(enemy);
-    possibleMoves = pawnAttacks[turn][idx] & enemyPieces;
+    possibleMoves = attackTables.pawnAttacks(static_cast<int>(turn), idx) & enemyPieces;
     const int row = idx / 8;
     const int col = idx % 8;
     const int direction = turn == White ? 1 : -1;
@@ -246,194 +246,22 @@ u64 Board::getPawnMoves(int idx, side turn) const
     return possibleMoves;
 }
 
-void Board::initKing()
-{
-    int d[8] = {1, -1, 8, -8, 9, -9, 7, -7};
-
-    for(int i = 0; i < 64; i++)
-    {
-        u64 bb = 0;
-        for(int j = 0; j < 8; j++)
-        {
-            int idx = i + d[j];
-            if(idx >= 0 && idx < 64 && (abs(i % 8 - idx % 8) <= 1))
-            {
-                bb |= (1ULL << idx);
-            }
-        }
-        kingAttacks[i] = bb;
-    }
-}
-
-void Board::initKnight()
-{
-    int d[8] = {-17, -15, -10, -6, 6, 10, 15, 17};
-
-    for(int i = 0; i < 64; i++)
-    {
-        u64 bb = 0;
-        for(int j = 0; j < 8; j++)
-        {
-            int idx = i + d[j];
-            if(idx >= 0 && idx < 64 && (abs(i % 8 - idx % 8) <= 2))
-            {
-                bb |= (1ULL << idx);
-            }
-        }
-        knightAttacks[i] = bb;
-    }
-}
-
-void Board::initPawn()
-{
-    int dWhite[2] = {7, 9};
-    int dBlack[2] = {-9, -7};
-    int idx = 0;
-    // Peones blancos
-    for(int i = 8; i < 56; i++)
-    {
-        u64 bb = 0;
-
-        for(int j = 0; j < 2; j++)
-        {
-            idx = i + dWhite[j];
-            if(idx >= 0 && idx < 64 && abs(i % 8 - idx % 8) == 1)
-            {
-                bb |= (1ULL << idx);
-            }
-        }
-        pawnAttacks[0][i] = bb;
-    }
-    // Peones negros
-    for(int i = 8; i < 56; i++)
-    {
-        u64 bb = 0;
-
-        for(int j = 0; j < 2; j++)
-        {
-            idx = i + dBlack[j];
-            if(idx >= 0 && idx < 64 && abs(i % 8 - idx % 8) == 1)
-            {
-                bb |= (1ULL << idx);
-            }
-        }
-        pawnAttacks[1][i] = bb;
-    }
-}
-
 u64 Board::getKnightMoves(int idx, side turn) const
 {
     if (idx < 0 || idx >= 64) {
         return 0;
     }
 
-    return knightAttacks[idx] & ~getSidePieces(turn);
+    return attackTables.knightAttacks(idx) & ~getSidePieces(turn);
 }
 
 u64 Board::getBishopMoves(int idx, side turn) const
 {
-    u64 possibleMoves = 0;
-
-    if (idx < 0 || idx >= 64) {
-        return possibleMoves;
-    }
-
-    const u64 ownPieces = getSidePieces(turn);
-    const u64 allPieces = getAllPieces();
-
-    const int startRow = idx / 8;
-    const int startCol = idx % 8;
-
-    // Arriba-izquierda, arriba-derecha,
-    // abajo-izquierda, abajo-derecha.
-    constexpr int directions[4][2] = {
-        { 1, -1 },
-        { 1,  1 },
-        {-1, -1 },
-        {-1,  1 }
-    };
-
-    for (const auto& direction : directions) {
-        int row = startRow + direction[0];
-        int col = startCol + direction[1];
-
-        while (row >= 0 && row < 8 &&
-               col >= 0 && col < 8) {
-
-            int destination = row * 8 + col;
-            u64 destinationMask = 1ULL << destination;
-
-            // Una pieza propia bloquea la diagonal.
-            if (ownPieces & destinationMask) {
-                break;
-            }
-
-            possibleMoves |= destinationMask;
-
-            // Una pieza enemiga se puede capturar,
-            // pero no se puede continuar detrás de ella.
-            if (allPieces & destinationMask) {
-                break;
-            }
-
-            row += direction[0];
-            col += direction[1];
-        }
-    }
-
-    return possibleMoves;
+    return attackTables.bishopAttacks(idx, getAllPieces()) & ~getSidePieces(turn);
 }
-
 u64 Board::getRookMoves(int idx, side turn) const
 {
-    u64 possibleMoves = 0;
-
-    if (idx < 0 || idx >= 64) {
-        return possibleMoves;
-    }
-
-    const u64 ownPieces = getSidePieces(turn);
-    const u64 allPieces = getAllPieces();
-
-    const int startRow = idx / 8;
-    const int startCol = idx % 8;
-    
-    constexpr int directions[4][2] = {
-        { 1, 0 },
-        {-1, 0 },
-        { 0, -1},
-        { 0, 1 }
-    };
-
-    for (const auto& direction : directions) {
-        int row = startRow + direction[0];
-        int col = startCol + direction[1];
-
-        while (row >= 0 && row < 8 &&
-               col >= 0 && col < 8) {
-
-            int destination = row * 8 + col;
-            u64 destinationMask = 1ULL << destination;
-
-            // Una pieza propia bloquea la fila/columna.
-            if (ownPieces & destinationMask) {
-                break;
-            }
-
-            possibleMoves |= destinationMask;
-
-            // Una pieza enemiga se puede capturar,
-            // pero no se puede continuar detrás de ella.
-            if (allPieces & destinationMask) {
-                break;
-            }
-
-            row += direction[0];
-            col += direction[1];
-        }
-    }
-
-    return possibleMoves;
+    return attackTables.rookAttacks(idx, getAllPieces()) & ~getSidePieces(turn);
 }
 
 u64 Board::getQueenMoves(int idx, side turn) const
@@ -448,7 +276,7 @@ u64 Board::getKingMoves(int idx, side turn) const
         return possibleMoves;
     }
 
-    possibleMoves = kingAttacks[idx] & ~getSidePieces(turn);
+    possibleMoves = attackTables.kingAttacks(idx) & ~getSidePieces(turn);
 
     const int kingStart = turn == White ? 4 : 60;
     const int kingsideRook = turn == White ? 7 : 63;
@@ -480,13 +308,7 @@ u64 Board::getKingMoves(int idx, side turn) const
 
 u64 Board::getPawnAttacks(side color) const
 {
-    const u64 pawns = getPieces(color, Pawn);
-
-    if (color == White) {
-        return ((pawns & ~ColA) << 7) | ((pawns & ~ColH) << 9);
-    }
-
-    return ((pawns & ~ColA) >> 9) | ((pawns & ~ColH) >> 7);
+    return attackTables.pawnAttacks(static_cast<int>(color), getPieces(color, Pawn));
 }
 
 bool Board::kingAttacked(side s)

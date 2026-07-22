@@ -1,3 +1,8 @@
+#ifdef _WIN32
+#include <process.h>
+#include <windows.h>
+#endif
+
 #include "board.h"
 #include <cstdlib>
 #include <iostream>
@@ -301,29 +306,71 @@ int negamax(Board cboard, int depth)
     return maxEval;
 }
 
-#include <future>
+#ifdef _WIN32
+struct ParallelPerftJob {
+    Board board;
+    std::string move;
+    int depth;
+    u64* result;
+};
+
+unsigned __stdcall runParallelPerftJob(void* rawJob) {
+    auto* job = static_cast<ParallelPerftJob*>(rawJob);
+    if (getMove(job->move, job->board, job->board.getTurn()) == 0) {
+        *job->result = perft(job->board, job->depth - 1);
+    }
+    delete job;
+    return 0;
+}
+#endif
 
 u64 parallelPerft(Board& cboard, int depth) {
     if (depth == 0) return 1;
 
-    const auto moves = generateAllMoves(cboard);
-    std::vector<std::future<u64>> jobs;
+    // Take one snapshot before launching workers.  Each worker must operate
+    // on its own board, and should not capture the caller's board by
+    // reference while other workers are running.
+    Board root = cboard;
+    const auto moves = generateAllMoves(root);
+    std::vector<u64> results(moves.size(), 0);
 
-    for (const auto& move : moves) {
-        jobs.push_back(std::async(std::launch::async, [&cboard, move, depth] {
-            Board local = cboard;  // independent board for this worker
-
-            if (getMove(move, local, local.getTurn()) != 0) {
-                return u64{0};     // pseudo-legal move rejected as illegal
+#ifdef _WIN32
+    std::vector<HANDLE> jobs;
+    for (std::size_t i = 0; i < moves.size(); ++i) {
+        auto* job = new ParallelPerftJob{root, moves[i], depth, &results[i]};
+        HANDLE handle = reinterpret_cast<HANDLE>(_beginthreadex(
+            nullptr, 0, runParallelPerftJob, job, 0, nullptr));
+        if (handle != nullptr) {
+            jobs.push_back(handle);
+        } else {
+            delete job;
+            // Preserve correctness if the OS refuses to create a worker.
+            Board local = root;
+            if (getMove(moves[i], local, local.getTurn()) == 0) {
+                results[i] = perft(local, depth - 1);
             }
-
-            return perft(local, depth - 1);
-        }));
+        }
     }
 
+    for (HANDLE job : jobs) {
+        WaitForSingleObject(job, INFINITE);
+        CloseHandle(job);
+    }
+#else
+    // Keep a portable synchronous fallback for non-Windows builds.  The
+    // Windows build uses native workers because the bundled MinGW runtime
+    // does not provide std::thread/std::future.
+    for (std::size_t i = 0; i < moves.size(); ++i) {
+        Board local = root;
+        if (getMove(moves[i], local, local.getTurn()) == 0) {
+            results[i] = perft(local, depth - 1);
+        }
+    }
+#endif
+
     u64 nodes = 0;
-    for (auto& job : jobs) {
-        nodes += job.get();
+    for (const u64 result : results) {
+        nodes += result;
     }
     return nodes;
 }
@@ -332,7 +379,7 @@ int main() {
     Board cboard;
     bool turn = 0;
 
-    std::cout<<parallelPerft(cboard, 6)<<'\n';
+    std::cout<<parallelPerft(cboard, 7)<<'\n';
     
     /*while(true){
         std::string move;
