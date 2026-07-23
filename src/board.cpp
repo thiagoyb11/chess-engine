@@ -20,6 +20,7 @@ Board::Board()
       } {
         halfmoveClock = 0;
         moveCount = 0;
+        whiteEval = 0;
       }
 
 u64 Board::getPieces(side s, enumPiece p) const {
@@ -40,13 +41,23 @@ void Board::removePieceAt(int idx) {
     }
 
     const u64 keepMask = ~(1ULL << idx);
+    const bool wasWhitePiece = (pieceBB[White] & (1ULL << idx)) != 0;
+    const bool wasBlackPiece = (pieceBB[Black] & (1ULL << idx)) != 0;
 
-    for (u64& bitboard : pieceBB) {
-        bitboard &= keepMask;
+    for (int i = 0; i < 8; i++) {
+        u64 bb = pieceBB[i];
+        pieceBB[i] &= keepMask;
+        if (bb != pieceBB[i] && i > 1) {
+            if (wasWhitePiece) {
+                whiteEval -= pieceValues[i - 2];
+            } else if (wasBlackPiece) {
+                whiteEval += pieceValues[i - 2];
+            }
+        }
     }
 }
 
-int Board::getPieceAt(int idx)
+int Board::getPieceAt(int idx) const
 {
     for(int i = 2; i < 8; i++)
     {
@@ -58,7 +69,7 @@ int Board::getPieceAt(int idx)
     return -1;
 }
 
-int Board::updatePosition(int start, int end, side s, enumPiece p) {
+int Board::updatePosition(int start, int end, side s, enumPiece p, enumPiece promoted) {
     if (start < 0 || start >= 64 || end < 0 || end >= 64) {
         return -1;
     }
@@ -75,9 +86,24 @@ int Board::updatePosition(int start, int end, side s, enumPiece p) {
     previousState.turn = turn;
     previousState.moveCount = moveCount;
     previousState.halfmoveClock = halfmoveClock;
+    previousState.pieceCaptured = false;
+    previousState.capturedPiece = Pawn;
+    previousState.whiteEval = whiteEval;
 
     const u64 startMask = 1ULL << start;
     const u64 endMask = 1ULL << end;
+
+    const int endRank = end / 8;
+    const bool reachesPromotionRank = p == Pawn &&
+        ((s == White && endRank == 7) || (s == Black && endRank == 0));
+    if (reachesPromotionRank) {
+        if (promoted != Bishop && promoted != Knight &&
+            promoted != Rook && promoted != Queen) {
+            return -1;
+        }
+    } else if (promoted != Pawn) {
+        return -1;
+    }
 
     const int pieceIndex = p + 2;
     const int kingStart = s == White ? 4 : 60;
@@ -132,16 +158,18 @@ int Board::updatePosition(int start, int end, side s, enumPiece p) {
 
     if (pieceBB[enemy] & endMask) {
         pieceCaptured = true;
+        previousState.capturedPiece = static_cast<enumPiece>(getPieceAt(end));
         removePieceAt(end);
     }
     if (enPassantCapture) {
         pieceCaptured = true;
+        previousState.capturedPiece = Pawn;
         removePieceAt(capturedPawnSquare);
     }
+    previousState.pieceCaptured = pieceCaptured;
     if (p == Pawn && abs(start - end) == 16) {
         enPassantSquare = end;
     }
-
 
     if (p == King) {
         if (s == White) {
@@ -167,6 +195,15 @@ int Board::updatePosition(int start, int end, side s, enumPiece p) {
     pieceBB[pieceIndex] &= ~startMask;
     pieceBB[pieceIndex] |= endMask;
 
+    if (reachesPromotionRank) {
+        // The pawn has already been moved onto the destination. Replace it
+        // in the type bitboards while leaving the side bitboard untouched.
+        pieceBB[Pawn + 2] &= ~endMask;
+        pieceBB[promoted + 2] |= endMask;
+        const int materialDelta = pieceValues[promoted] - pieceValues[Pawn];
+        whiteEval += s == White ? materialDelta : -materialDelta;
+    }
+
     if (castling) {
         const int rookStart = kingsideCastle ? start + 3 : start - 4;
         const int rookEnd = kingsideCastle ? start + 1 : start - 1;
@@ -185,6 +222,7 @@ int Board::updatePosition(int start, int end, side s, enumPiece p) {
         castleBlackKingside = previousState.castleBlackKingside;
         castleBlackQueenside = previousState.castleBlackQueenside;
         enPassantSquare = previousState.enPassantSquare;
+        whiteEval = previousState.whiteEval;
         return -1;
     }
     if(turn == White) turn = Black;
@@ -360,6 +398,40 @@ void Board::saveBoardState(const MoveState& state)
     moveHistory.push_back(state);
 }
 
+int Board::calculateEval(side s) const
+{
+    int score = 0;
+    u64 allPieces = getAllPieces();
+    u64 sidePieces = getSidePieces(s);
+
+    for(int i = 0; i < 64; i++)
+    {
+        if(allPieces & (1ULL << i))
+        {
+            int pieceIdx = getPieceAt(i);
+            enumPiece p = static_cast<enumPiece>(pieceIdx);
+            int pieceValue = pieceValues[p];
+
+            if(sidePieces & (1ULL << i))
+            {
+                score += pieceValue;
+            }
+            else
+            {
+                score -= pieceValue;
+            }
+        }
+    }
+    return score;
+}
+
+int Board::evalPosition(side s)
+{
+    // Material is maintained incrementally in updatePosition.  This keeps
+    // evaluation constant-time after the board has been initialized.
+    return s == White ? whiteEval : -whiteEval;
+}
+
 void Board::loadFromFEN(const std::string& fen)
 {
     std::istringstream input(fen);
@@ -452,6 +524,7 @@ void Board::loadFromFEN(const std::string& fen)
     halfmoveClock = newHalfmoveClock;
     moveCount = 2 * (fullmoveNumber - 1) + (turn == Black ? 1 : 0);
     moveHistory.clear();
+    whiteEval = calculateEval(White);
 }
 
 void Board::undoMove()
@@ -472,4 +545,5 @@ void Board::undoMove()
     turn = previousState.turn;
     moveCount = previousState.moveCount;
     halfmoveClock = previousState.halfmoveClock;
+    whiteEval = previousState.whiteEval;
 }

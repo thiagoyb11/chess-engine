@@ -12,6 +12,13 @@ class Board {
 public:
     enum side { White, Black };
     enum enumPiece { Pawn, Bishop, Knight, Rook, Queen, King };
+    struct Move {
+        std::uint8_t start;
+        std::uint8_t end;
+        // Pawn means no promotion; a promoting move uses Bishop/Knight/Rook/Queen.
+        enumPiece promotion;
+    };
+    const int pieceValues[6] = {100, 325, 300, 500, 900, 1000};
 
     Board();
 
@@ -20,8 +27,8 @@ public:
     u64 getAllPieces() const;
     u64 getPawnAttacks(side color) const;
     void removePieceAt(int idx);
-    int getPieceAt(int idx);
-    int updatePosition(int start, int end, side s, enumPiece p);
+    int getPieceAt(int idx) const;
+    int updatePosition(int start, int end, side s, enumPiece p, enumPiece promoted = Pawn);
     u64 getPawnMoves(int idx, side turn) const;
     u64 getKnightMoves(int idx, side turn) const;
     u64 getBishopMoves(int idx, side turn) const;
@@ -29,6 +36,7 @@ public:
     u64 getQueenMoves(int idx, side turn) const;
     u64 getKingMoves(int idx, side turn) const;
     bool kingAttacked(side s);
+    int evalPosition(side s);
     void loadFromFEN(const std::string& fen);
     side getTurn() const { return turn; }
     void undoMove();
@@ -46,9 +54,13 @@ private:
         side turn;
         int moveCount;
         int halfmoveClock;
+        bool pieceCaptured;
+        enumPiece capturedPiece;
+        int whiteEval;
     };
 
     void saveBoardState(const MoveState& state);
+    int calculateEval(side s) const;
 
     u64 pieceBB[8];
     bool castleWhiteKingside = true;
@@ -60,4 +72,5 @@ private:
     int moveCount;
     std::vector<MoveState> moveHistory;
     int halfmoveClock;
+    int whiteEval;
 };
