@@ -6,6 +6,7 @@
 
 namespace {
 const MagicBitboards attackTables;
+const Zobrist zobrist;
 }
 Board::Board()
     : pieceBB{
@@ -20,7 +21,8 @@ Board::Board()
       } {
         halfmoveClock = 0;
         moveCount = 0;
-        whiteEval = 0;
+        whiteEval = calculateEval(White);
+        hash = calculateHash();
       }
 
 u64 Board::getPieces(side s, enumPiece p) const {
@@ -49,9 +51,11 @@ void Board::removePieceAt(int idx) {
         pieceBB[i] &= keepMask;
         if (bb != pieceBB[i] && i > 1) {
             if (wasWhitePiece) {
-                whiteEval -= pieceValues[i - 2];
+                whiteEval -= PSQT[(i - 2) * 64 + idx];
+                hash ^= zobrist.getPiece(White, i - 2, idx);
             } else if (wasBlackPiece) {
-                whiteEval += pieceValues[i - 2];
+                whiteEval += PSQT[(i - 2) * 64 + (idx ^ 56)];
+                hash ^= zobrist.getPiece(Black, i - 2, idx);
             }
         }
     }
@@ -89,6 +93,7 @@ int Board::updatePosition(int start, int end, side s, enumPiece p, enumPiece pro
     previousState.pieceCaptured = false;
     previousState.capturedPiece = Pawn;
     previousState.whiteEval = whiteEval;
+    previousState.hash = hash;
 
     const u64 startMask = 1ULL << start;
     const u64 endMask = 1ULL << end;
@@ -154,6 +159,9 @@ int Board::updatePosition(int start, int end, side s, enumPiece p, enumPiece pro
         enPassantSquare == capturedPawnSquare &&
         (pieceBB[enemy] & pieceBB[Pawn + 2] & (1ULL << capturedPawnSquare));
 
+    if (enPassantSquare >= 0) {
+        hash ^= zobrist.getEnPassantFile(enPassantSquare % 8);
+    }
     enPassantSquare = -1;
 
     if (pieceBB[enemy] & endMask) {
@@ -169,25 +177,35 @@ int Board::updatePosition(int start, int end, side s, enumPiece p, enumPiece pro
     previousState.pieceCaptured = pieceCaptured;
     if (p == Pawn && abs(start - end) == 16) {
         enPassantSquare = end;
+        hash ^= zobrist.getEnPassantFile(end % 8);
     }
+
+    auto clearCastlingRight = [&](bool& right, int index) {
+        if (right) {
+            right = false;
+            hash ^= zobrist.getCastling(index);
+        }
+    };
 
     if (p == King) {
         if (s == White) {
-            castleWhiteKingside = castleWhiteQueenside = false;
+            clearCastlingRight(castleWhiteKingside, 0);
+            clearCastlingRight(castleWhiteQueenside, 1);
         } else {
-            castleBlackKingside = castleBlackQueenside = false;
+            clearCastlingRight(castleBlackKingside, 2);
+            clearCastlingRight(castleBlackQueenside, 3);
         }
     }
     if (p == Rook) {
-        if (start == 0) castleWhiteQueenside = false;
-        if (start == 7) castleWhiteKingside = false;
-        if (start == 56) castleBlackQueenside = false;
-        if (start == 63) castleBlackKingside = false;
+        if (start == 0) clearCastlingRight(castleWhiteQueenside, 1);
+        if (start == 7) clearCastlingRight(castleWhiteKingside, 0);
+        if (start == 56) clearCastlingRight(castleBlackQueenside, 3);
+        if (start == 63) clearCastlingRight(castleBlackKingside, 2);
     }
-    if (end == 0) castleWhiteQueenside = false;
-    if (end == 7) castleWhiteKingside = false;
-    if (end == 56) castleBlackQueenside = false;
-    if (end == 63) castleBlackKingside = false;
+    if (end == 0) clearCastlingRight(castleWhiteQueenside, 1);
+    if (end == 7) clearCastlingRight(castleWhiteKingside, 0);
+    if (end == 56) clearCastlingRight(castleBlackQueenside, 3);
+    if (end == 63) clearCastlingRight(castleBlackKingside, 2);
 
     pieceBB[s] &= ~startMask;
     pieceBB[s] |= endMask;
@@ -195,16 +213,27 @@ int Board::updatePosition(int start, int end, side s, enumPiece p, enumPiece pro
     pieceBB[pieceIndex] &= ~startMask;
     pieceBB[pieceIndex] |= endMask;
 
-    if (reachesPromotionRank) {
+    if (reachesPromotionRank)
+    {
         // The pawn has already been moved onto the destination. Replace it
         // in the type bitboards while leaving the side bitboard untouched.
         pieceBB[Pawn + 2] &= ~endMask;
         pieceBB[promoted + 2] |= endMask;
-        const int materialDelta = pieceValues[promoted] - pieceValues[Pawn];
+        const int materialDelta = s == White ? (PSQT[promoted * 64 + end] - PSQT[start]) : (PSQT[promoted * 64 + (end ^ 56)] - PSQT[start ^ 56]);
         whiteEval += s == White ? materialDelta : -materialDelta;
+        hash ^= zobrist.getPiece(s, p, start);
+        hash ^= zobrist.getPiece(s, promoted, end);
+    }
+    else
+    {
+        const int materialDelta = s == White ? (PSQT[p * 64 + end] - PSQT[p * 64 + start]) : (PSQT[p * 64 + (end ^ 56)] - PSQT[p * 64 + (start ^ 56)]);
+        whiteEval += s == White ? materialDelta : -materialDelta;
+        hash ^= zobrist.getPiece(s, p, start);
+        hash ^= zobrist.getPiece(s, p, end);
     }
 
-    if (castling) {
+    if (castling)
+    {
         const int rookStart = kingsideCastle ? start + 3 : start - 4;
         const int rookEnd = kingsideCastle ? start + 1 : start - 1;
         const u64 rookStartMask = 1ULL << rookStart;
@@ -212,6 +241,8 @@ int Board::updatePosition(int start, int end, side s, enumPiece p, enumPiece pro
 
         pieceBB[s] = (pieceBB[s] & ~rookStartMask) | rookEndMask;
         pieceBB[Rook + 2] = (pieceBB[Rook + 2] & ~rookStartMask) | rookEndMask;
+        hash ^= zobrist.getPiece(s, Rook, rookStart);
+        hash ^= zobrist.getPiece(s, Rook, rookEnd);
     }
 
     if(kingAttacked(s))
@@ -223,10 +254,14 @@ int Board::updatePosition(int start, int end, side s, enumPiece p, enumPiece pro
         castleBlackQueenside = previousState.castleBlackQueenside;
         enPassantSquare = previousState.enPassantSquare;
         whiteEval = previousState.whiteEval;
+        hash = previousState.hash;
         return -1;
     }
-    if(turn == White) turn = Black;
-    else turn = White;
+
+
+
+    turn = (turn == White) ? Black : White;
+    hash ^= zobrist.getSideToMove();
     if(pieceCaptured || pawnMoved) halfmoveClock = 0;
     else halfmoveClock++;
     moveCount++;
@@ -408,9 +443,14 @@ int Board::calculateEval(side s) const
     {
         if(allPieces & (1ULL << i))
         {
-            int pieceIdx = getPieceAt(i);
-            enumPiece p = static_cast<enumPiece>(pieceIdx);
-            int pieceValue = pieceValues[p];
+            const int pieceIdx = getPieceAt(i);
+            if (pieceIdx < Pawn || pieceIdx > King) {
+                continue;
+            }
+
+            const int tableSquare =
+                (pieceBB[White] & (1ULL << i)) ? i : (i ^ 56);
+            const int pieceValue = PSQT[pieceIdx * 64 + tableSquare];
 
             if(sidePieces & (1ULL << i))
             {
@@ -525,6 +565,7 @@ void Board::loadFromFEN(const std::string& fen)
     moveCount = 2 * (fullmoveNumber - 1) + (turn == Black ? 1 : 0);
     moveHistory.clear();
     whiteEval = calculateEval(White);
+    hash = calculateHash();
 }
 
 void Board::undoMove()
@@ -546,4 +587,41 @@ void Board::undoMove()
     moveCount = previousState.moveCount;
     halfmoveClock = previousState.halfmoveClock;
     whiteEval = previousState.whiteEval;
+    hash = previousState.hash;
+}
+
+u64 Board::calculateHash() const
+{
+    u64 key = 0;
+
+    for(int square = 0; square < 64; square++)
+    {
+        const u64 mask = 1ULL << square;
+
+        for(int color = 0; color < 2; color++)
+        {
+            if ((pieceBB[color] & mask) == 0) continue;
+
+            for(int pieceType = Pawn; pieceType <= King; pieceType++)
+            {
+                if(pieceBB[pieceType + 2] & mask)
+                {
+                    key ^= zobrist.getPiece(color, pieceType, square);
+                    break;
+                }
+            }
+        }
+    }
+
+    if(turn == Black) key ^= zobrist.getSideToMove();
+
+    if (castleWhiteKingside)  key ^= zobrist.getCastling(0);
+    if (castleWhiteQueenside) key ^= zobrist.getCastling(1);
+    if (castleBlackKingside)  key ^= zobrist.getCastling(2);
+    if (castleBlackQueenside) key ^= zobrist.getCastling(3);
+
+    if (enPassantSquare >= 0)
+        key ^= zobrist.getEnPassantFile(enPassantSquare % 8);
+
+    return key;
 }

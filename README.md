@@ -37,7 +37,7 @@ Desde la raiz del proyecto:
 mkdir -p build
 g++ -std=c++17 -O2 -Wall -Wextra \
   src/main.cpp src/search.cpp src/move_generation.cpp \
-  src/board.cpp src/magic_bitboards.cpp \
+  src/board.cpp src/magic_bitboards.cpp src/zobrist_hashing.cpp \
   -o build/chess-engine
 ```
 
@@ -62,7 +62,7 @@ Puede compilarse como un ejecutable independiente:
 ```bash
 g++ -std=c++17 -O2 -Wall -Wextra \
   src/perft-testing.cpp src/move_generation.cpp \
-  src/board.cpp src/magic_bitboards.cpp \
+  src/board.cpp src/magic_bitboards.cpp src/zobrist_hashing.cpp \
   -o build/perft-testing
 ```
 
